@@ -162,4 +162,5 @@ When you want to use a remote controll with a different encoding, you can add sp
 - `invert(invert)`- sets colour invertion
 - `show()`- writes display buffer onto OLED
 
+
 This library is subclassing FrameBuffer to provide for graphic primitives. Documentation can be found [here](http://docs.micropython.org/en/latest/pyboard/library/framebuf.html) for the methods to dislpay graphics.
