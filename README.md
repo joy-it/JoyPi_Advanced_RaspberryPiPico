@@ -100,10 +100,11 @@ Download this repository and copy the folder lib onto your Raspberry Pi Pico.
 - `do_callback(cmd, addr, ext, thresh = 0)`- sets callback method manually
 - `error_function(func)`- sets a error method
 - `close()`- close communication
+
 If setting attribute `verbose` to true, the code emits debug output.
 When you want to use a remote controll with a different encoding, you can add specific encodings into this directory `ir_rx` from [here](https://github.com/peterhinch/micropython_ir/tree/master/ir_rx).
 
-*Note:* When you define your callback method, it needs to receive the arguments `data` - value from the remote, `addr` - address from remote and `ctrl` - always 0 with NEC encoding.
+**Note:** When you define your callback method, it needs to receive the arguments `data` - value from the remote, `addr` - address from remote and `ctrl` - always 0 with NEC encoding.
 ### 7-segment display
 - `HT16K33Segment(i2c, i2c_adress=0x70)`- initialize 7-segment display with default values
 - `rotate()`- rotate the segment display
