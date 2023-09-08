@@ -102,6 +102,7 @@ Download this repository and copy the folder lib onto your Raspberry Pi Pico.
 - `close()`- close communication
 
 If setting attribute `verbose` to true, the code emits debug output.
+
 When you want to use a remote controll with a different encoding, you can add specific encodings into this directory `ir_rx` from [here](https://github.com/peterhinch/micropython_ir/tree/master/ir_rx).
 
 **Note:** When you define your callback method, it needs to receive the arguments `data` - value from the remote, `addr` - address from remote and `ctrl` - always 0 with NEC encoding.
