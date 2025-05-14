@@ -9,8 +9,12 @@ class I2CLCD:
         """
         self._addr = addr
         self.i2c = i2c
+        
+        self.i2c.writeto(self._addr, bytes([0x00, 0x00]))
         self.backlight = 0x80
-        self.registerSelect = 0x00
+        self.registerSelect = 0x02
+        self.en = 0x04
+        
         self.columns = 16
         self.rows = 2
         
@@ -19,61 +23,60 @@ class I2CLCD:
         """
         making a write operation
         """
-        self.i2c.writeto(self._addr, bytes([0x09, data|0x04, data]))
+        self.i2c.writeto(self._addr, bytes([0x09, data | self.en]))
+        utime.sleep_us(1)
+        self.i2c.writeto(self._addr, bytes([0x09, data & ~self.en]))
+        utime.sleep_us(50)
         
         
-    def _set(self, data):
+    def _set(self, data, is_data):
         """
-        making a set operation
+        preparing data for write operation
         """
-        temp = (data & 0xF0) >> 1
-        temp = temp | self.backlight | self.registerSelect
-        self._write(temp)
+        _data = ((data & 0x0F) << 3)
+        if is_data:
+            _data |= self.registerSelect
+        _data |= self.backlight
+        self._write(_data)
     
+    def _send(self, data, is_data):
+        """
+        splitting data in two parts
+        """
+        self._set(data >> 4, is_data)
+        self._set(data & 0x0F, is_data)
     
     def _command(self, data):
         """
         making a command operation
         """
-        self.registerSelect = 0x00
-        self._set(data)
-        self._set(data << 4)
+        self._send(data, is_data=False)
         
         
     def _sendData(self, data):
         """
         making a send data operation
         """
-        self.registerSelect = 0x02
-        self._set(data)
-        self._set(data << 4)
+        self._send(data, is_data=True)
         
     
     def begin(self):
         """
         setup communciation with LCD
         """
-        self.i2c.writeto(self._addr, bytes([0x00, 0xFF]))
-        self.i2c.writeto(self._addr, bytes([0x06, 0x00]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0xFD]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0xF9]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0xF1]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0xE1]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0xC1]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0x81]))
-        self.i2c.writeto(self._addr, bytes([0x00, 0x01]))
-        self.i2c.writeto(self._addr, bytes([0x09, 0x00]))
-    
-        utime.sleep_ms(1)
+        utime.sleep_ms(50)
         
-        self._command(0x33)
-        self._command(0x32)
-        self._command(0x0C)
+        for i in range(3):
+            self._set(0x03, False)
+            utime.sleep_ms(5)
+        self._set(0x02, False)
+
         self._command(0x28)
+        self._command(0x08)
+        self._command(0x01)
+        utime.sleep_ms(2)
         self._command(0x06)
-        
-        self.clear()
-        self.setHome()
+        self._command(0x0C) 
     
     
     def clear(self):
@@ -81,14 +84,15 @@ class I2CLCD:
         clear LCD
         """
         self._command(0x01)
+        utime.sleep_ms(2)
     
     
     def setHome(self):
         """
         set cursor to (0,0)
         """
-        self._command(0x02)
-    
+        self.setCursor(0,0)
+        
     
     def shiftToLeft(self):
         """
@@ -131,7 +135,6 @@ class I2CLCD:
         turn off LCD
         """
         self.backlight = 0x00
-        self._set(0)
         self._command(0x00)
 
     
@@ -140,7 +143,6 @@ class I2CLCD:
         turn on LCD
         """
         self.backlight = 0x80
-        self._set(0)
         self._command(0x04)
 
 
@@ -163,9 +165,5 @@ class I2CLCD:
         """
         print on LCD LCD
         """
-        utime.sleep_ms(3)
-        for i in range(len(text)):
-            self._sendData(ord(text[i]))
-            utime.sleep_ms(10)
-
-
+        for char in text:
+            self._sendData(ord(char))
