@@ -112,8 +112,10 @@ class ST7735:
         self._cs.low()
         self.spi.write(bytearray([command]))
         self._dc.high()
-        for item in data:
-            self.spi.write(bytearray([item]))
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            self.spi.write(data)
+        else:
+            self.spi.write(bytes(data))
         self._cs.high()
         
         
@@ -121,8 +123,10 @@ class ST7735:
         """
         sets Window to draw in
         """
-        self.send(self.CASET, [0x00, x0, 0x00, x1])
-        self.send(self.RASET, [0x00, y0, 0x00, y1])
+        x0, y0 = x0 + self.offset[0], y0 + self.offset[1]
+        x1, y1 = x1 + self.offset[0], y1 + self.offset[1]
+        self.send(self.CASET, [(x0 >> 8) & 0xFF, x0 & 0xFF, (x1 >> 8) & 0xFF, x1 & 0xFF])
+        self.send(self.RASET, [(y0 >> 8) & 0xFF, y0, (y1 >> 8) & 0xFF, y1 & 0xFF])
         
         
     def begin(self):
@@ -198,7 +202,7 @@ class ST7735:
             return 0x0000
             
         
-    def fillRec(self, x, y, width, height, colour):
+    def fillRectangle(self, x, y, width, height, colour):
         """
         draw a filled rectangle
         x - left upper corner x-coordinate
@@ -208,20 +212,121 @@ class ST7735:
         colour - rgb tuple
         """
         conv_col = self.convertColour(colour)
-        hColour = (conv_col >> 8) % 256
-        lColour = conv_col % 256
+        high_colour = (conv_col >> 8) & 0xFF
+        low_colour = conv_col & 0xFF
+        row_buffer = bytes((high_colour, low_colour)) * width
+        rows_per_block = max(1, min(height, 1024 // len(row_buffer)))
+        block_buffer = row_buffer * rows_per_block
+        complete_blocks = height // rows_per_block
+        remaining_rows = height % rows_per_block
         self.setWindow(x, y, x + width - 1, y + height - 1)
         self.enterDataMode()
-        for iX in range(height, 0, -1):
-            self.spi.write(bytearray([hColour, lColour]*width))
+        for _ in range(complete_blocks):
+            self.spi.write(block_buffer)
+        if remaining_rows:
+            self.spi.write(row_buffer * remaining_rows)
         self.exitDataMode()
     
+    def drawRectangle(self, x, y, width, height, colour):
+        """
+        draw outline of a rectangle
+        x - left upper corner x-coordinate
+        y - left upper corner y-coordinate
+        width - width of rectangle
+        height - height of rectangle
+        colour - rgb tuple
+        """
+        if width <= 0 or height <= 0:
+            return
+        # bottom edge
+        self.drawHorizontalLine(x, y, width -1, colour)
+        # top edge
+        if height > 1:
+            self.drawHorizontalLine(x, y + height -1, width -1, colour)
+        # left and right edges
+        if height > 2:
+            self.drawVerticalLine(x, y, height, colour)
+            if width > 1:
+                self.drawVerticalLine(x + width -1 , y, height, colour)
+                
+        
+        
+    def fillTriangle(self, x0, y0, x1, y1, x2, y2, colour):
+        """
+        draw a filled triangle
+        x0 - first corner x-coordinate
+        y0 - first corner y-coordinate
+        x1 - second corner x-coordinate
+        y1 - second corner y-coordinate
+        x2 - third corner x-coordinate
+        y2 - third corner y-coordinate
+        colour - rgb tuple
+        """
+        conv_col = self.convertColour(colour)
+        hColour = (conv_col >> 8) % 256
+        lColour = conv_col % 256
+        # sort point by y-coordinate y0 <= y1 <= y2
+        if y0 > y1:
+            x0, x1 = x1, x0
+            y0, y1 = y1, y0
+        if y1 > y2:
+            x1, x2 = x2, x1
+            y1, y2 = y2, y1
+        if y0 > y1:
+            x0, x1 = x1, x0
+            y0, y1 = y1, y0
+        # all point on one line
+        if y0 == y1 and y1 == y2:
+            line_start = min(x0, x1, x2)
+            line_end = max(x0, x1, x2)
+            self.drawHorizontalLine(line_start, y0, line_end, colour)
+            return
+        dx01 = x1 - x0
+        dy01 = y1 - y0
+        dx02 = x2 - x0
+        dy02 = y2 - y0
+        dx12 = x2 - x1
+        dy12 = y2 - y1
+        # check if y1 is part of upper or lower part of triangle
+        if y1 == y2:
+            last_y = y1
+        else:
+            last_y = y1 - 1
+        step_a = 0
+        step_b = 0
+        # upper part of triangle
+        for y in range(y0, last_y + 1):
+            if dy01 != 0:
+                x_start = x0 + step_a // dy01
+            else:
+                x_start = x0
+            x_end = x0 + step_b // dy02
+            step_a += dx01
+            step_b += dx02
+            if x_start > x_end:
+                x_start, x_end = x_end, x_start
+            self.drawLine(x_start, y, x_end, y, colour)
+        # lower part of triangle
+        start_y = last_y + 1
+        step_a = dx12 * (start_y - y1)
+        step_b = dx02 * (start_y - y0)
+        for y in range(start_y, y2 + 1):
+            if dy12 != 0:
+                x_start = x1 + step_a // dy12
+            else:
+                x_start = x1
+            x_end = x0 + step_b // dy02
+            step_a += dx12
+            step_b += dx02
+            if x_start > x_end:
+                x_start, x_end = x_end, x_start
+            self.drawLine(x_start, y, x_end, y, colour)
     
     def fill(self, colour):
         """
         fill display in one colour
         """
-        self.fillRec(0, 0, self.width, self.height, colour)
+        self.fillRectangle(0, 0, self.width, self.height, colour)
         
         
     def clear(self):
@@ -238,9 +343,9 @@ class ST7735:
         y - y-coordinate
         colour - rgb tuple
         """
-        self.setWindow(x + self.offset[0], y + self.offset[1], x+1, y+1)
+        self.setWindow(x, y, x, y)
         conv_col = self.convertColour(colour)
-        self.send(self.RAMWR, [conv_col >> 8, conv_col])
+        self.send(self.RAMWR, [(conv_col >> 8) & 0xFF, conv_col & 0xFF])
 
 
     def fillCircle(self, x, y, radius, colour):
@@ -251,14 +356,68 @@ class ST7735:
         radius - radius of circle
         colour - rgb tuple
         """
+        if radius < 0:
+            return
         conv_col = self.convertColour(colour)
-        for y1 in range(-radius, radius+1):
-            y1_squared = y1**2
-            for x1 in range(-radius, radius+1):
-                if x1**2 + y1_squared <= radius**2:
-                    self.setWindow(x+x1 + self.offset[0], y+y1 + self.offset[1], x+x1+1, y+y1+1)
-                    self.send(self.RAMWR, [conv_col >> 8, conv_col])
+        max_width = radius * 2 + 1
+        line_buffer = bytes(((conv_col >> 8) & 0xFF, conv_col & 0xFF)) * max_width
+        line_view = memoryview(line_buffer)
+        # Helper method to draw one clipped horizontal span
+        def draw_span(x, y, width):
+            if width <= 0:
+                return
+            # biggest line is outside of display
+            if y < 0 or y >= self.height:
+                return
+            # cut of the left side
+            if x < 0:
+                width += x
+                x = 0
+            # cut of right side
+            if x + width > self.width:
+                width = self.width - x
+            if width <= 0:
+                return
+            self.setWindow(x, y, x + width - 1, y)
+            self.enterDataMode()
+            self.spi.write(line_view[:width * 2])
+            self.exitDataMode()
         
+        radius_squared = radius * radius
+        x_radius = radius
+        # calculate on one side and draw simultainisly
+        for y_offset in range(radius + 1):
+            y_squared = y_offset * y_offset
+            while x_radius > 0 and x_radius**2 + y_squared > radius_squared:
+                x_radius -= 1
+            width = x_radius * 2 + 1
+            start_x = x - x_radius
+            # lower circle half
+            draw_span(start_x, y + y_offset, width)
+            # upper circle half
+            if y_offset != 0:
+                draw_span(start_x, y - y_offset, width)
+        
+    
+    def drawHorizontalLine(self, x, y, width, colour):
+        """
+        draw line on display
+        x - x-coordinate of starting point
+        y - y-coordinate of starting point
+        width - width of horizontal line
+        colour - rgb tuple
+        """
+        self.fillRectangle(x, y, width, 1, colour)
+        
+    def drawVerticalLine(self, x, y, height, colour):
+        """
+        draw line on display
+        x - x-coordinate of starting point
+        y - y-coordinate of starting point
+        width - width of horizontal line
+        colour - rgb tuple
+        """
+        self.fillRectangle(x, y, 1, height, colour)
         
     def drawLine(self, x1, y1, x2, y2, colour):
         """
@@ -269,32 +428,32 @@ class ST7735:
         y2 - y-coordinate of end point
         colour - rgb tuple
         """
-        conv_col = self.convertColour(colour)
+        # horizontal line
+        if y1 == y2:
+            self.drawHorizontalLine(min(x1, x2), y1, abs(x2 - x1) + 1, colour)
+            return
+        # vertical line
+        if x1 == x2:
+            self.drawVerticalLine(x1, min(y1, y2), abs(y2 - y1) + 1, colour)
+            return
+        # diagonal line
         dx = abs(x2 - x1)
         dy = abs(y2 - y1)
         sx = 1 if x1 < x2 else -1
         sy = 1 if y1 < y2 else -1
-        if dx > dy:
-            dx, dy = dy, dx
-            interchange = True
-        else:
-            interchange = False
-        p = 2*dy - dx
-        x, y = x1, y1
-        for i in range(dx + 1):
-            self.setWindow(x + self.offset[0], y + self.offset[1], x+1, y+1)
-            self.send(self.RAMWR, [conv_col >> 8, conv_col])
-            while p >= 0:
-                if interchange:
-                    x += sx
-                else:
-                    y += sy
-                p -= 2*dx
-            if interchange:
-                y += sy
-            else:
-                x += sx
-            p += 2*dy
+        error = dx - dy
+        
+        while True:
+            self.drawPixel(x1, y1, colour)
+            if x1 == x2 and y1 == y2:
+                break
+            error2 = 2*error
+            if error2 > -dy:
+                error -= dy
+                x1 += sx
+            if error2 < dx:
+                error += dx
+                y1 += sy
 
 
     def drawCircle(self, x_cent, y_cent, radius, colour):
